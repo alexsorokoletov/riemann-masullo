@@ -57,6 +57,246 @@ theorem spectralStripConvolution_nuclear_of_zero_width (hwidth : α = 0) (hs₁ 
     exact (nuclearEndomorphisms _).zero_mem
   exact line (-0) ((neg_nonpos.mpr hα).trans hα) neg_zero
 
+namespace ConvolutionFactorization
+
+open Function Set
+open scoped Pointwise
+
+section Abstract
+
+variable {G : Type*} [CommGroup G] [TopologicalSpace G] [IsTopologicalGroup G] [T2Space G]
+  [LocallyCompactSpace G] [MeasurableSpace G] [BorelSpace G]
+variable (a : BruhatStructuralPair G)
+private abbrev kernel := (OrderDual.ofDual a.val.2).comap a.val.1.subtype
+private abbrev stageMap : a.val.1 →* a.quotient := QuotientGroup.mk' (kernel a)
+
+omit [MeasurableSpace G] [BorelSpace G] in
+/-- The structural quotient map has compact kernel and is proper. -/
+private theorem properStageMap : IsProperMap (stageMap a) := by
+  let H := a.val.1
+  let K := OrderDual.ofDual a.val.2
+  have hK : IsCompact (K : Set G) := (lcaDualAnnihilator_annihilator K a.property.2.2.1.1) ▸
+    isCompact_lcaDualAnnihilator (lcaAnnihilator K) a.property.2.2.1.2.1
+  have hc : IsCompact (kernel a : Set a.val.1) :=
+    (H.isClosed_of_isOpen a.property.1).isClosedEmbedding_subtypeVal.isCompact_preimage hK
+  refine isProperMap_iff_isClosedMap_and_compact_fibers.mpr
+    ⟨QuotientGroup.continuous_mk, QuotientGroup.isClosedMap_coe hc, ?_⟩
+  intro y
+  obtain ⟨x, rfl⟩ := QuotientGroup.mk'_surjective (kernel a) y
+  change IsCompact (QuotientGroup.mk ⁻¹' {QuotientGroup.mk x})
+  rw [← image_singleton, QuotientGroup.preimage_image_mk_eq_mul]
+  exact isCompact_singleton.mul hc
+
+open Classical in
+private def lift (f : a.quotient → ℂ) (x : G) : ℂ :=
+  if hx : x ∈ a.val.1 then f (stageMap a ⟨x, hx⟩) else 0
+
+private abbrev onStage (e : ElementaryLCAPresentation a.quotient) (f : SchwartzBruhatStage e)
+    (q : a.quotient) := f (Multiplicative.toAdd (e.equiv q))
+
+omit [IsTopologicalGroup G] [T2Space G] [LocallyCompactSpace G] [MeasurableSpace G] [BorelSpace G] in
+private theorem lift_stage (e : ElementaryLCAPresentation a.quotient) (f : SchwartzBruhatStage e) :
+    lift a (onStage a e f) = schwartzBruhatStageRealization a e f := by
+  funext x
+  rw [schwartzBruhatStageRealization_apply]
+  rfl
+
+private theorem compact_lift {f : a.quotient → ℂ} (hf : HasCompactSupport f) :
+    HasCompactSupport (lift a f) := by
+  classical
+  let C := tsupport f
+  have hc : IsCompact ((stageMap a) ⁻¹' C) := (properStageMap a).isCompact_preimage hf
+  apply HasCompactSupport.intro (hc.image continuous_subtype_val)
+  intro x hx
+  by_cases h : x ∈ a.val.1
+  · rw [lift, dite_eq_left h]
+    apply image_eq_zero_of_notMem_tsupport
+    exact fun he ↦ hx ⟨⟨x, h⟩, he, rfl⟩
+  · rw [lift, dite_eq_right h]
+
+private theorem compact_down {f : a.quotient → ℂ} (hf : HasCompactSupport (lift a f)) :
+    HasCompactSupport f := by
+  classical
+  let C := tsupport (lift a f)
+  have hc : IsCompact ((a.val.1).subtype ⁻¹' C) :=
+    (a.val.1.isClosed_of_isOpen a.property.1).isClosedEmbedding_subtypeVal.isCompact_preimage hf
+  apply HasCompactSupport.intro (hc.image (properStageMap a).continuous)
+  intro q hq
+  obtain ⟨x, rfl⟩ := QuotientGroup.mk'_surjective (kernel a) q
+  have hx : x.val ∉ C := fun he ↦ hq ⟨x, he, rfl⟩
+  have he : lift a f x.val = 0 := image_eq_zero_of_notMem_tsupport hx
+  rw [lift, dite_eq_left x.property] at he
+  exact he
+
+/-- A compactly supported function in the elementary Schwartz stage gives a compact Bruhat test. -/
+private theorem stageTest (e : ElementaryLCAPresentation a.quotient) (u : SchwartzBruhatStage e)
+    (hu : HasCompactSupport (onStage a e u)) :
+    ∃ v : BruhatCompactSupport G, v.val = lift a (onStage a e u) := by
+  have hc := compact_lift a hu
+  rw [lift_stage] at hc
+  let C : TopologicalSpace.Compacts G := ⟨_, hc⟩
+  have hm := (mem_bruhatCompactSupportStage_iff a e C u).mpr (Subset.rfl)
+  exact ⟨bruhatCompactSupportStageInclusion a e C ⟨u, hm⟩, (lift_stage a e u).symm⟩
+
+private abbrev sourceMeasure (μ : Measure G) := μ.comap a.val.1.subtype
+private abbrev quotientMeasure (μ : Measure G) : @Measure a.quotient (borel _) :=
+  @Measure.map _ _ _ (borel _) (stageMap a) (sourceMeasure a μ)
+
+/-- Restrict Haar measure to the open subgroup, then push it through the compact-kernel quotient. -/
+private theorem quotientHaar (μ : Measure G) [μ.IsHaarMeasure] :
+    letI : MeasurableSpace a.quotient := borel _
+    (quotientMeasure a μ).IsHaarMeasure := by
+  let : MeasurableSpace a.quotient := borel _
+  let : BorelSpace a.quotient := ⟨rfl⟩
+  let : LocallyCompactSpace a.val.1 := a.property.1.isOpenEmbedding_subtypeVal.locallyCompactSpace
+  let : LocallyCompactSpace a.quotient := QuotientGroup.instLocallyCompactSpace (kernel a)
+  let : T1Space a.quotient := QuotientGroup.t1Space_iff.mpr
+    (a.property.2.2.1.1.preimage continuous_subtype_val)
+  let : (sourceMeasure a μ).IsHaarMeasure := Measure.IsHaarMeasure.comap
+    (mH := ContinuousMul.measurableMul) μ (f := a.val.1.subtype) a.property.1.isOpenEmbedding_subtypeVal
+  exact Measure.isHaarMeasure_map (sourceMeasure a μ) (stageMap a) (properStageMap a).continuous
+    (QuotientGroup.mk'_surjective _) (isProperMap_iff_tendsto_cocompact.mp (properStageMap a)).2
+
+/-- Pullback followed by zero extension intertwines the two convolutions for this choice of Haar measure. -/
+private theorem lift_conv (μ : Measure G) (f g : a.quotient → ℂ)
+    (hf : Continuous f) (hg : Continuous g) :
+    letI : MeasurableSpace a.quotient := borel _
+    lift a (lcaConvolution (quotientMeasure a μ) f g) = lcaConvolution μ (lift a f) (lift a g) := by
+  classical
+  let : MeasurableSpace a.quotient := borel _
+  let : BorelSpace a.quotient := ⟨rfl⟩
+  funext x
+  by_cases hx : x ∈ a.val.1
+  · let x' : a.val.1 := ⟨x, hx⟩
+    rw [lift, dite_eq_left hx]
+    unfold lcaConvolution
+    let p (y : a.quotient) := f y * g (y⁻¹ * stageMap a x')
+    have hpc : Continuous p := hf.mul (hg.comp (continuous_inv.mul continuous_const))
+    change ∫ y, p y ∂((sourceMeasure a μ).map (stageMap a)) = _
+    rw [MeasureTheory.integral_map (properStageMap a).continuous.measurable.aemeasurable
+      hpc.aestronglyMeasurable]
+    let P (y : G) := lift a f y * lift a g (y⁻¹ * x)
+    have he : (∫ y, P y ∂μ) = ∫ y in (a.val.1 : Set G), P y ∂μ :=
+      (setIntegral_eq_integral_of_forall_compl_eq_zero fun y hy ↦ by
+        change y ∉ a.val.1 at hy
+        change lift a f y * _ = 0
+        rw [lift, dite_eq_right hy, zero_mul]).symm
+    change _ = ∫ y, P y ∂μ
+    rw [he, ← integral_subtype_comap a.property.1.measurableSet]
+    apply integral_congr_ae
+    filter_upwards with y
+    have hyx : y.val⁻¹ * x ∈ a.val.1 := a.val.1.mul_mem (a.val.1.inv_mem y.property) hx
+    change f (stageMap a y) * g ((stageMap a y)⁻¹ * stageMap a x') = P y.val
+    simp only [P, lift, dite_eq_left y.property, dite_eq_left hyx]
+    congr 2
+  · rw [lift, dite_eq_right hx, lcaConvolution]
+    suffices h : (fun y ↦ lift a f y * lift a g (y⁻¹ * x)) = 0 by simp [h]
+    funext y
+    by_cases hy : y ∈ a.val.1
+    · have hz : y⁻¹ * x ∉ a.val.1 := fun hz ↦ hx (by simpa using a.val.1.mul_mem hy hz)
+      simp [lift, hz]
+    · simp [lift, hy]
+
+/-- The scalar input concerns compactly supported functions of elementary coordinates alone. -/
+private def ElementaryFactorization {Q : Type*} [CommGroup Q] [TopologicalSpace Q]
+    (e : ElementaryLCAPresentation Q) (ν : @Measure Q (borel _)) : Prop :=
+  letI : MeasurableSpace Q := borel _
+  let V (f : SchwartzBruhatStage e) (x : Q) := f (Multiplicative.toAdd (e.equiv x))
+  ∀ f : SchwartzBruhatStage e, HasCompactSupport (V f) →
+    V f ∈ AddSubmonoid.closure {θ : Q → ℂ | ∃ u v : SchwartzBruhatStage e,
+      HasCompactSupport (V u) ∧ HasCompactSupport (V v) ∧ θ = lcaConvolution ν (V u) (V v)}
+
+/-- Finite sums of convolutions of elementary test functions lift to the original group. -/
+private theorem stage_descent [SecondCountableTopology G] (μ : Measure G) [μ.IsHaarMeasure]
+    (e : ElementaryLCAPresentation a.quotient) (hdm : ElementaryFactorization e (quotientMeasure a μ))
+    (f : SchwartzBruhatStage e) (φ : BruhatCompactSupport G)
+    (hφ : φ.val = schwartzBruhatStageRealization a e f) :
+    φ ∈ AddSubmonoid.closure {θ : BruhatCompactSupport G |
+      ∃ u v : BruhatCompactSupport G, θ.val = lcaConvolution μ u.val v.val} := by
+  classical
+  let : MeasurableSpace a.quotient := borel _
+  let : BorelSpace a.quotient := ⟨rfl⟩
+  let D := AddSubmonoid.closure {θ : BruhatCompactSupport G |
+      ∃ u v : BruhatCompactSupport G, θ.val = lcaConvolution μ u.val v.val}
+  have he : φ.val = lift a (onStage a e f) := hφ.trans (lift_stage a e f).symm
+  have hc : HasCompactSupport (onStage a e f) := compact_down a (he ▸ φ.property.2)
+  have hbase := hdm f hc
+  let P (h : a.quotient → ℂ) := ∃ t ∈ D, t.val = lift a h
+  have ht : P (onStage a e f) := by
+    apply AddSubmonoid.closure_induction (motive := fun h _ ↦ P h) _ _ _ hbase
+    · intro h hh
+      obtain ⟨u, v, hu, hv, rfl⟩ := hh
+      obtain ⟨s, hs⟩ := stageTest a e u hu
+      obtain ⟨t, ht⟩ := stageTest a e v hv
+      have H : lift a (lcaConvolution (quotientMeasure a μ) (onStage a e u) (onStage a e v)) =
+          lcaConvolution μ s.val t.val := by
+        rw [hs, ht]
+        exact lift_conv a μ _ _ ((elementarySchwartz_continuous u).comp e.equiv.continuous)
+          ((elementarySchwartz_continuous v).comp e.equiv.continuous)
+      let ρ : G →* (ℂ →L[ℂ] ℂ) := 1
+      have hρ : Continuous (fun p : G × ℂ ↦ ρ p.1 p.2) := continuous_snd
+      obtain ⟨k, hk, _⟩ := bruhatRegularizedAction_convolution μ ρ hρ s t
+      exact ⟨k, AddSubmonoid.subset_closure ⟨s, t, hk⟩, hk.trans H.symm⟩
+    · refine ⟨0, D.zero_mem, funext fun x ↦ ?_⟩
+      by_cases hx : x ∈ a.val.1 <;> simp [lift, hx] <;> rfl
+    · intro h g _ _ ih ig
+      obtain ⟨u, hu, heu⟩ := ih
+      obtain ⟨v, hv, hev⟩ := ig
+      refine ⟨u + v, D.add_mem hu hv, funext (fun x ↦ ?_)⟩
+      change u.val x + v.val x = _
+      rw [heu, hev]
+      by_cases hx : x ∈ a.val.1 <;> simp [lift, hx]
+      rfl
+  obtain ⟨t, ht, het⟩ := ht
+  exact (show φ = t from Subtype.ext (he.trans het.symm)) ▸ ht
+
+end Abstract
+
+section Adeles
+
+universe u
+variable {K₀ : Type u} [Field K₀] [NumberField K₀]
+local notation "C₀" => IdeleClassGroup (𝓞 K₀) K₀
+
+/-- Every compact Bruhat test on the idele class group is realized on one structural quotient. -/
+private theorem adelic_factorization_of_elementary
+    (h : ∀ (Q : Type u) [CommGroup Q] [TopologicalSpace Q] [IsTopologicalGroup Q]
+      (e : ElementaryLCAPresentation Q) (ν : @Measure Q (borel _)),
+      letI : MeasurableSpace Q := borel _
+      ν.IsHaarMeasure → ElementaryFactorization e ν) (φ : BruhatCompactSupport C₀) :
+    φ ∈ AddSubmonoid.closure {θ : BruhatCompactSupport C₀ | ∃ u v : BruhatCompactSupport C₀,
+      θ.val = lcaConvolution (ideleClassTamagawaMeasure K₀) u.val v.val} := by
+  let m : C₀ →ₜ* ℝ≥0ˣ := continuousIdeleClassNorm K₀
+  have hm : IsModulation (G := C₀) m := by
+    change IsProperMap (ideleClassNorm K₀) ∧ ∃ g, ideleClassNorm K₀ g ≠ 1
+    exact ⟨isProperMap_ideleClassNorm K₀, ideleClassNorm_ne_one (F := K₀)⟩
+  have hs : Surjective m := (ideleGroup_quotient.{_, 0} K₀).2.2.2.2.2.2.2.2.2.1
+  have hφ := bruhatCompactSupport_le_modulatedExponentialDecay (G := C₀) m ({0} : Set ℝ) hm hs φ.property
+  rw [modulatedExponentialDecaySubmodule_singleton_zero] at hφ
+  obtain ⟨a, e, f, hf⟩ := (mem_schwartzBruhatSubmodule_iff (G := C₀) φ.val).mp hφ
+  exact stage_descent a (ideleClassTamagawaMeasure K₀) e (h _ e _ (quotientHaar a _)) f φ hf.symm
+
+end Adeles
+
+/-- Classical input: Dixmier and Malliavin, *Factorisations de fonctions et de vecteurs
+indéfiniment différentiables*, Bull. Sci. Math. (2) 102 (1978), Théorème 3.1. On the elementary
+abelian Lie group presented by `e` (a product of Euclidean, torus, lattice and finite factors),
+each compactly supported smooth function is a finite sum of convolutions of two such functions
+for the given Haar measure. Smooth functions of compact support belong to the elementary
+Schwartz stage; the membership below is in the algebraic additive closure. -/
+private theorem elementary_compact_convolution_factorization {Q : Type*} [CommGroup Q]
+    [TopologicalSpace Q] [IsTopologicalGroup Q] (e : ElementaryLCAPresentation Q)
+    (ν : @Measure Q (borel _)) :
+    letI : MeasurableSpace Q := borel _
+    ν.IsHaarMeasure →
+      let V (f : SchwartzBruhatStage e) (x : Q) := f (Multiplicative.toAdd (e.equiv x))
+      ∀ f : SchwartzBruhatStage e, HasCompactSupport (V f) →
+        V f ∈ AddSubmonoid.closure {θ : Q → ℂ | ∃ u v : SchwartzBruhatStage e,
+          HasCompactSupport (V u) ∧ HasCompactSupport (V v) ∧ θ = lcaConvolution ν (V u) (V v)} := by
+  sorry
+
+end ConvolutionFactorization
+
 /-- Classical input: the Dixmier–Malliavin factorization theorem. Every compactly supported
 Bruhat test on the idele class group is a finite sum of convolutions of two such tests, for
 the Tamagawa Haar measure. J. Dixmier and P. Malliavin, *Factorisations de fonctions et de
@@ -65,11 +305,14 @@ Théorème 3.1, applied on the Lie group `G₁ / K` for an open subgroup `G₁` 
 subgroup `K` with respect to which the test is a Bruhat test (F. Bruhat, *Distributions sur
 un groupe localement compact et applications à l'étude des représentations des groupes
 ℘-adiques*, Bull. Soc. Math. France 89 (1961), 43–75). The library proves the case of tests
-of one angular character (`spectralHomogeneousTest_convolution_factorization` in §10.3). -/
+of one angular character (`spectralHomogeneousTest_convolution_factorization` in §10.3).
+The structural quotient and zero extension reduce this to factorization on the elementary Lie group. -/
 theorem bruhatCompactSupport_convolution_factorization (φ : BruhatCompactSupport C𝔽) :
     φ ∈ AddSubmonoid.closure {θ : BruhatCompactSupport C𝔽 |
       ∃ u v : BruhatCompactSupport C𝔽, θ.val = lcaConvolution μ𝔽 u.val v.val} := by
-  sorry
+  apply ConvolutionFactorization.adelic_factorization_of_elementary
+  intro Q _ _ _ e ν hν
+  exact ConvolutionFactorization.elementary_compact_convolution_factorization e ν hν
 
 /-- Paper: Theorem 10.4.2.1, p. 459, at orders `0 ≤ s ≤ 1`. Every compactly supported Bruhat
 test acts on the strip quotient by a Hilbert–Schmidt operator.
